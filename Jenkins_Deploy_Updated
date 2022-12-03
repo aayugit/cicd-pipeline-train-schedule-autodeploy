@@ -1,0 +1,126 @@
+pipeline {
+    agent any
+    environment {
+        //be sure to replace "bhavukm" with your own Docker Hub username
+        DOCKER_IMAGE_NAME = "aayudoc/train-schedule"
+    }
+    stages {
+        stage('Build') {
+            	         steps {
+                // step1 
+                echo 'compiling..'
+		            git url: 'https://github.com/aayugit/cicd-pipeline-train-schedule-autodeploy'
+		            sh script: '/opt/maven/bin/mvn compile'
+           }
+        }
+        stage('codereview-pmd') {
+	         steps {
+                // step2
+                echo 'codereview..'
+		            sh script: '/opt/maven/bin/mvn -P metrics pmd:pmd'
+           }
+	         post {
+               success {
+		             recordIssues enabledForFailure: true, tool: pmdParser(pattern: '**/target/pmd.xml')
+               }
+           }		
+        }
+        stage('unit-test') {
+	          steps {
+                // step3
+                echo 'unittest..'
+	               sh script: '/opt/maven/bin/mvn test'
+            }
+	          post {
+               success {
+                   junit 'target/surefire-reports/*.xml'
+               }
+            }			
+        }
+        stage('codecoverage') {
+
+           tools {
+              jdk 'java1.8'
+           }
+	         steps {
+                // step4
+                echo 'codecoverage..'
+		            sh script: '/opt/maven/bin/mvn cobertura:cobertura -Dcobertura.report.format=xml'
+           }
+	         post {
+               success {
+	               cobertura autoUpdateHealth: false, autoUpdateStability: false, coberturaReportFile: 'target/site/cobertura/coverage.xml', conditionalCoverageTargets: '70, 0, 0', failUnhealthy: false, failUnstable: false, lineCoverageTargets: '80, 0, 0', maxNumberOfBuilds: 0, methodCoverageTargets: '80, 0, 0', onlyStable: false, sourceEncoding: 'ASCII', zoomCoverageChart: false                  
+               }
+           }		
+        }
+        stage('package/build-war') 
+	         steps {
+                // step5
+                echo 'package......'
+		            sh script: '/opt/maven/bin/mvn package'	
+           }		
+        }
+	stage('Build Docker Image') {
+		when {
+			branch 'master'
+		}
+		steps {
+			script {
+				app = docker.build(DOCKER_IMAGE_NAME)
+				app.inside {
+					sh 'echo Hello, World!'
+				}
+			}
+		}
+	}
+	stage('Push Docker Image') {
+		when {
+			branch 'master'
+		}
+		steps {
+			script {
+				docker.withRegistry('https://registry.hub.docker.com', 'docker_hub_login') {
+					app.push("${env.BUILD_NUMBER}")
+					app.push("latest")
+				}
+			}
+		}
+	}
+	stage('CanaryDeploy') {
+		when {
+			branch 'master'
+		}
+		environment { 
+			CANARY_REPLICAS = 1
+		}
+		steps {
+			kubernetesDeploy(
+				kubeconfigId: 'kubeconfig',
+				configs: 'train-schedule-kube-canary.yml',
+				enableConfigSubstitution: true
+			)
+		}
+	}
+	stage('DeployToProduction') {
+		when {
+			branch 'master'
+		}
+		environment { 
+			CANARY_REPLICAS = 0
+		}
+		steps {
+			input 'Deploy to Production?'
+			milestone(1)
+			kubernetesDeploy(
+				kubeconfigId: 'kubeconfig',
+				configs: 'train-schedule-kube-canary.yml',
+				enableConfigSubstitution: true
+			)
+			kubernetesDeploy(
+				kubeconfigId: 'kubeconfig',
+				configs: 'train-schedule-kube.yml',
+				enableConfigSubstitution: true
+			)
+		}
+	}
+}
