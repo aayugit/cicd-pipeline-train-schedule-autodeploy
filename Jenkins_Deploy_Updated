@@ -53,12 +53,15 @@ pipeline {
                }
            }		
         }
-        stage('package/build-war') 
-	         steps {
+        stage('package/build-war') {
+			 steps {
                 // step5
                 echo 'package......'
 		            sh script: '/opt/maven/bin/mvn package'	
            }		
+			
+		}
+	        
         }
 	stage('Build Docker Image') {
 		when {
