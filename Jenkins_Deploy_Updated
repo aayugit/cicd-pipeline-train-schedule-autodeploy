@@ -63,7 +63,8 @@ pipeline {
 		}
 	        
         }
-	stage('Build Docker Image') {
+	stage('Build Docker Image') { 
+			//Edited here
 		when {
 			branch 'master'
 		}
